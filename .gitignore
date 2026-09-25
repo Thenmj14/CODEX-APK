@@ -7,3 +7,5 @@ android/local.properties
 *.log
 build-error*.log
 src_backup_before_merge/
+pack.zip
+*.zip
