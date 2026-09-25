@@ -1,0 +1,27 @@
+{
+  "name": "mark1-blocks-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "blockly": "^12.5.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^44.3.0",
+    "vite": "^5.4.0"
+  },
+  "description": "A visual block-programming IDE for the Mark1 robot (Arduino Nano). Drag blocks → see live Arduino code → upload in one click.",
+  "main": "vite.config.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

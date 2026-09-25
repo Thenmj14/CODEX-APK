@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  src/blocks/toolbox.xml
+  Defines which blocks appear in which category in the sidebar.
+  To add a new block: add a <block type="your_block_id"/> here.
+  To add a new category: add a <category> element.
+  Never edit React components just to show/hide blocks.
+-->
+<xml id="toolbox" style="display: none">
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  MARK1 ROBOT                                           -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="🤖 Mark1 Robot" colour="#FF6B35">
+
+    <label text="Setup" />
+    <block type="mark1_begin"></block>
+
+    <label text="Motion" />
+    <block type="mark1_forward">
+      <value name="SPEED">
+        <block type="math_number"><field name="NUM">150</field></block>
+      </value>
+    </block>
+    <block type="mark1_move_timed">
+      <value name="SPEED">
+        <block type="math_number"><field name="NUM">150</field></block>
+      </value>
+      <value name="DURATION">
+        <block type="math_number"><field name="NUM">1000</field></block>
+      </value>
+    </block>
+    <block type="mark1_stop"></block>
+    <block type="mark1_set_speed">
+      <value name="LEFT">
+        <block type="math_number"><field name="NUM">150</field></block>
+      </value>
+      <value name="RIGHT">
+        <block type="math_number"><field name="NUM">150</field></block>
+      </value>
+    </block>
+
+    <label text="LED" />
+    <block type="mark1_led_color"></block>
+    <block type="mark1_led_rgb">
+      <value name="R"><block type="math_number"><field name="NUM">255</field></block></value>
+      <value name="G"><block type="math_number"><field name="NUM">0</field></block></value>
+      <value name="B"><block type="math_number"><field name="NUM">0</field></block></value>
+    </block>
+    <block type="mark1_led_off"></block>
+    <block type="mark1_led_blink">
+      <value name="TIMES"><block type="math_number"><field name="NUM">3</field></block></value>
+      <value name="INTERVAL"><block type="math_number"><field name="NUM">300</field></block></value>
+    </block>
+    <block type="mark1_led_brightness">
+      <value name="BRIGHTNESS"><block type="math_number"><field name="NUM">80</field></block></value>
+    </block>
+
+    <label text="Sensors" />
+    <block type="mark1_read_sensor"></block>
+    <block type="mark1_on_line"></block>
+
+  </category>
+  <category name="🤖 Mark2" colour="#3399ff">
+
+  <label text="Setup"/>
+
+  <block type="mark2_begin"></block>
+
+  </category>
+  
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  ARDUINO I/O                                           -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="⚡ Arduino I/O" colour="#54A0FF">
+    <block type="io_digitalwrite"></block>
+    <block type="io_digitalread"></block>
+    <block type="io_analogwrite"></block>
+    <block type="io_analogread"></block>
+    <block type="io_highlow"></block>
+    <block type="io_pulsein"></block>
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  TIME                                                  -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="⏱️ Time" colour="#A29BFE">
+    <block type="time_delay">
+      <value name="DELAY_TIME_MILI">
+        <block type="math_number"><field name="NUM">1000</field></block>
+      </value>
+    </block>
+    <block type="time_delaymicros">
+      <value name="DELAY_TIME_MICRO">
+        <block type="math_number"><field name="NUM">100</field></block>
+      </value>
+    </block>
+    <block type="time_millis"></block>
+    <block type="time_micros"></block>
+    <block type="infinite_loop"></block>
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  LOGIC                                                 -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="🔀 Logic" colour="#5C81A6">
+    <block type="controls_if"></block>
+    <block type="controls_ifelse"></block>
+    <block type="logic_compare"></block>
+    <block type="logic_operation"></block>
+    <block type="logic_negate"></block>
+    <block type="logic_boolean"></block>
+    <block type="logic_null"></block>
+    <block type="logic_ternary"></block>
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  LOOPS                                                 -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="🔁 Loops" colour="#5BA55B">
+    <block type="controls_repeat_ext">
+      <value name="TIMES">
+        <block type="math_number"><field name="NUM">10</field></block>
+      </value>
+    </block>
+    <block type="controls_whileUntil"></block>
+    <block type="controls_for">
+      <value name="FROM"><block type="math_number"><field name="NUM">1</field></block></value>
+      <value name="TO"><block type="math_number"><field name="NUM">10</field></block></value>
+      <value name="BY"><block type="math_number"><field name="NUM">1</field></block></value>
+    </block>
+    <block type="controls_flow_statements"></block>
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  MATH                                                  -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="🔢 Math" colour="#5B67A5">
+    <block type="math_number"></block>
+    <block type="math_arithmetic"></block>
+    <block type="math_single"></block>
+    <block type="math_trig"></block>
+    <block type="math_constant"></block>
+    <block type="math_number_property"></block>
+    <block type="math_change">
+      <value name="DELTA">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+    </block>
+    <block type="math_round"></block>
+    <block type="math_modulo"></block>
+    <block type="math_constrain">
+      <value name="LOW"><block type="math_number"><field name="NUM">1</field></block></value>
+      <value name="HIGH"><block type="math_number"><field name="NUM">100</field></block></value>
+    </block>
+    <block type="math_random_int">
+      <value name="FROM"><block type="math_number"><field name="NUM">1</field></block></value>
+      <value name="TO"><block type="math_number"><field name="NUM">100</field></block></value>
+    </block>
+    <block type="math_map"></block>
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  VARIABLES                                             -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="📦 Variables" colour="#A55B80" custom="VARIABLE"></category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  FUNCTIONS                                             -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="🔧 Functions" colour="#995BA5" custom="PROCEDURE"></category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  SERIAL (Input/Output)                                 -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="📺 Serial" colour="#006E9A">
+    <block type="serial_setup">
+      <value name="SPEED">
+        <block type="math_number"><field name="NUM">9600</field></block>
+      </value>
+    </block>
+    <block type="serial_print">
+      <value name="CONTENT">
+        <block type="text"><field name="TEXT">Hello</field></block>
+      </value>
+    </block>
+    <block type="serial_println">
+      <value name="CONTENT">
+        <block type="text"><field name="TEXT">Hello</field></block>
+      </value>
+    </block>
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!--  TEXT                                                  -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <category name="💬 Text" colour="#5BA58C">
+    <block type="text"></block>
+    <block type="text_join"></block>
+    <block type="text_length"></block>
+    <block type="text_print"></block>
+  </category>
+
+</xml>
