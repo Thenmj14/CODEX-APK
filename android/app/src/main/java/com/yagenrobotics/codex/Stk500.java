@@ -1,5 +1,10 @@
 package com.yagenrobotics.codex;
 
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.Toast;
+
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 
 import java.io.IOException;
@@ -21,16 +26,62 @@ class Stk500 {
     private final UsbSerialPort port;
     private final int pageSize;      // bytes per flash page (128 for atmega328p)
     private final StringBuilder log;
+    private final Context ctx;       // used only to show a real on-screen prompt, may be null
 
-    Stk500(UsbSerialPort port, int pageSize, StringBuilder log) {
+    Stk500(UsbSerialPort port, int pageSize, StringBuilder log, Context ctx) {
         this.port = port;
         this.pageSize = pageSize;
         this.log = log;
+        this.ctx = ctx;
     }
 
-    // Pulses DTR low->high the way Arduino's auto-reset circuit expects,
-    // then waits for the bootloader to be ready.
+    private void showToast(String message) {
+        if (ctx == null) return;
+        new Handler(Looper.getMainLooper()).post(() ->
+                Toast.makeText(ctx, message, Toast.LENGTH_LONG).show());
+    }
+
+    // Pulses DTR/RTS the way Arduino's auto-reset circuit expects, then
+    // sends GET_SYNC quickly and repeatedly, because the stock bootloader
+    // (optiboot) only listens for about 1 second after reset before it
+    // gives up and jumps to whatever program is already on the board.
+    // If we miss that window, we pulse reset again and try once more.
     void resetAndSync() throws IOException, TimeoutException {
+        Exception last = null;
+        for (int cycle = 0; cycle < 3; cycle++) {
+            pulseReset();
+            try {
+                syncBurst(1200);
+                log.append("Synced with bootloader\n");
+                return;
+            } catch (Exception e) {
+                last = e;
+                log.append("Sync attempt ").append(cycle + 1).append(" missed the bootloader window, retrying reset...\n");
+            }
+        }
+
+        // Automatic (software) reset did not work - this happens on some
+        // clone boards that do not wire up the auto-reset circuit the same
+        // way a genuine Uno does. Fall back to a manual reset: give the
+        // person a window to press the board's own RESET button, and keep
+        // listening the whole time so we catch the bootloader whenever it
+        // wakes up, however they time the button press.
+        log.append("\nAutomatic reset did not get a response.\n");
+        log.append("PRESS THE RESET BUTTON ON THE BOARD NOW - listening for 10 seconds...\n");
+        showToast("Press the RESET button on the board now!");
+        try {
+            syncBurst(10000);
+            log.append("Synced with bootloader after manual reset\n");
+            return;
+        } catch (Exception e) {
+            last = e;
+        }
+
+        throw new TimeoutException("Could not sync with bootloader (auto-reset and manual reset both failed): "
+                + (last != null ? last.getMessage() : "no response"));
+    }
+
+    private void pulseReset() throws IOException {
         port.setDTR(true);
         port.setRTS(true);
         sleep(50);
@@ -39,25 +90,61 @@ class Stk500 {
         sleep(50);
         port.setDTR(true);
         port.setRTS(true);
-        sleep(50);
         drain();
-        // Optiboot needs a moment after reset before it starts listening.
-        sleep(300);
+    }
 
-        Exception last = null;
-        for (int attempt = 0; attempt < 15; attempt++) {
+    // Fires GET_SYNC every ~40ms for up to 1.2s using short per-byte reads,
+    // so several attempts fit inside the bootloader's short listen window.
+    private void syncBurst(long windowMs) throws IOException, TimeoutException {
+        long deadline = System.currentTimeMillis() + windowMs;
+        int totalBytesSeen = 0;
+        StringBuilder rawSeen = new StringBuilder();
+        int writeAttempts = 0;
+        while (System.currentTimeMillis() < deadline) {
             try {
                 send(new byte[]{CMD_GET_SYNC, CRC_EOP});
-                expectOk(1000);
-                log.append("Synced with bootloader\n");
-                return;
-            } catch (Exception e) {
-                last = e;
-                sleep(150);
+                writeAttempts++;
+            } catch (IOException e) {
+                log.append("  write failed: ").append(e).append("\n");
+                throw e;
+            }
+            int[] seenCount = new int[1];
+            if (tryReadOk(120, seenCount, rawSeen)) return;
+            totalBytesSeen += seenCount[0];
+        }
+        log.append("  diagnostic: sent ").append(writeAttempts)
+           .append(" sync commands, received ").append(totalBytesSeen).append(" total byte(s) back");
+        if (rawSeen.length() > 0) {
+            log.append(" [").append(rawSeen).append("]");
+        }
+        log.append("\n");
+        throw new TimeoutException("no response");
+    }
+
+    // Like expectOk, but returns false on timeout instead of throwing,
+    // and uses a short timeout so we can retry fast within the sync burst.
+    // Also reports how many bytes it saw and what they were, for diagnostics.
+    private boolean tryReadOk(int timeoutMs, int[] seenCountOut, StringBuilder rawSeen) throws IOException {
+        byte[] buf = new byte[1];
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        int state = 0; // 0 = waiting for INSYNC, 1 = waiting for OK
+        while (System.currentTimeMillis() < deadline) {
+            int n = port.read(buf, 30);
+            if (n <= 0) continue;
+            seenCountOut[0]++;
+            if (rawSeen.length() < 40) {
+                if (rawSeen.length() > 0) rawSeen.append(",");
+                rawSeen.append(String.format("%02X", buf[0]));
+            }
+            if (state == 0) {
+                if (buf[0] == RESP_INSYNC) state = 1;
+                // else: stray byte, ignore and keep waiting
+            } else {
+                if (buf[0] == RESP_OK) return true;
+                state = 0; // unexpected byte, start over
             }
         }
-        throw new TimeoutException("Could not sync with bootloader: "
-                + (last != null ? last.getMessage() : "no response"));
+        return false;
     }
 
     void enterProgMode() throws IOException, TimeoutException {

@@ -85,7 +85,7 @@ class UsbUploadHelper {
                 IntelHex hex = IntelHex.parse(hexPath);
                 log.append("Program size: ").append(hex.length).append(" bytes\n");
 
-                Stk500 stk = new Stk500(port, 128, log);
+                Stk500 stk = new Stk500(port, 128, log, ctx);
                 log.append("Resetting board and syncing bootloader...\n");
                 stk.resetAndSync();
 
