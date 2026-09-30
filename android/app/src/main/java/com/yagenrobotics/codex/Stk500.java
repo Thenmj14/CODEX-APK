@@ -1,17 +1,19 @@
 package com.yagenrobotics.codex;
 
 import android.content.Context;
-import android.os.Handler;
-import android.os.Looper;
-import android.widget.Toast;
 
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.concurrent.TimeoutException;
 
-// STK500v1: the protocol Arduino Uno / Nano bootloaders speak (what avrdude
-// calls "arduino" programmer type). Talks over the already-open serial port.
+// STK500v1: the protocol Arduino Uno bootloaders speak (what avrdude calls
+// the "arduino" programmer). Talks over the already-open USB serial port.
+//
+// IMPORTANT: replies are read into a buffer at least as big as the USB packet
+// size. Asking Android for fewer bytes than the chip sends makes the transfer
+// fail and the data is lost, which is what broke the earlier versions.
 class Stk500 {
 
     private static final byte CRC_EOP = 0x20;
@@ -26,126 +28,100 @@ class Stk500 {
     private final UsbSerialPort port;
     private final int pageSize;      // bytes per flash page (128 for atmega328p)
     private final StringBuilder log;
-    private final Context ctx;       // used only to show a real on-screen prompt, may be null
+    private final byte[] rxBuf;
+    private final ArrayDeque<Byte> rxQueue = new ArrayDeque<>();
 
-    Stk500(UsbSerialPort port, int pageSize, StringBuilder log, Context ctx) {
+    Stk500(UsbSerialPort port, int pageSize, StringBuilder log) {
         this.port = port;
         this.pageSize = pageSize;
         this.log = log;
-        this.ctx = ctx;
+        int maxPacket = 64;
+        try {
+            maxPacket = Math.max(64, port.getReadEndpoint().getMaxPacketSize());
+        } catch (Exception ignored) { }
+        this.rxBuf = new byte[maxPacket];
+        log.append("USB read buffer: ").append(maxPacket).append(" bytes\n");
     }
 
-    private void showToast(String message) {
-        if (ctx == null) return;
-        new Handler(Looper.getMainLooper()).post(() ->
-                Toast.makeText(ctx, message, Toast.LENGTH_LONG).show());
+    // Kept so older UsbUploadHelper versions (which pass a Context) still compile.
+    Stk500(UsbSerialPort port, int pageSize, StringBuilder log, Context ctx) {
+        this(port, pageSize, log);
     }
 
-    // Pulses DTR/RTS the way Arduino's auto-reset circuit expects, then
-    // sends GET_SYNC quickly and repeatedly, because the stock bootloader
-    // (optiboot) only listens for about 1 second after reset before it
-    // gives up and jumps to whatever program is already on the board.
-    // If we miss that window, we pulse reset again and try once more.
+    // ---- reset + sync ----------------------------------------------------------
+
     void resetAndSync() throws IOException, TimeoutException {
         Exception last = null;
-        for (int cycle = 0; cycle < 3; cycle++) {
+        for (int cycle = 0; cycle < 4; cycle++) {
+            if (cycle == 2) {
+                log.append("No reply at 115200 baud, trying 57600 (older bootloader)...\n");
+                port.setParameters(57600, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            }
             pulseReset();
             try {
-                syncBurst(1200);
+                syncBurst(1500);
                 log.append("Synced with bootloader\n");
                 return;
-            } catch (Exception e) {
+            } catch (TimeoutException e) {
                 last = e;
-                log.append("Sync attempt ").append(cycle + 1).append(" missed the bootloader window, retrying reset...\n");
+                log.append("Sync attempt ").append(cycle + 1).append(" got no reply.\n");
             }
         }
-
-        // Automatic (software) reset did not work - this happens on some
-        // clone boards that do not wire up the auto-reset circuit the same
-        // way a genuine Uno does. Fall back to a manual reset: give the
-        // person a window to press the board's own RESET button, and keep
-        // listening the whole time so we catch the bootloader whenever it
-        // wakes up, however they time the button press.
-        log.append("\nAutomatic reset did not get a response.\n");
-        log.append("PRESS THE RESET BUTTON ON THE BOARD NOW - listening for 10 seconds...\n");
-        showToast("Press the RESET button on the board now!");
-        try {
-            syncBurst(10000);
-            log.append("Synced with bootloader after manual reset\n");
-            return;
-        } catch (Exception e) {
-            last = e;
-        }
-
-        throw new TimeoutException("Could not sync with bootloader (auto-reset and manual reset both failed): "
+        throw new TimeoutException("Could not sync with the bootloader: "
                 + (last != null ? last.getMessage() : "no response"));
     }
 
+    // Same sequence avrdude uses for Arduino boards: release DTR/RTS for 250 ms
+    // so the reset capacitor charges, then assert them to pulse the reset line.
     private void pulseReset() throws IOException {
-        port.setDTR(true);
-        port.setRTS(true);
-        sleep(50);
         port.setDTR(false);
         port.setRTS(false);
-        sleep(50);
+        sleep(250);
         port.setDTR(true);
         port.setRTS(true);
+        sleep(50);
         drain();
     }
 
-    // Fires GET_SYNC every ~40ms for up to 1.2s using short per-byte reads,
-    // so several attempts fit inside the bootloader's short listen window.
+    // Sends GET_SYNC repeatedly and looks for INSYNC (0x14) followed by OK (0x10).
     private void syncBurst(long windowMs) throws IOException, TimeoutException {
         long deadline = System.currentTimeMillis() + windowMs;
-        int totalBytesSeen = 0;
-        StringBuilder rawSeen = new StringBuilder();
-        int writeAttempts = 0;
+        int sent = 0;
+        int seen = 0;
+        int state = 0; // 0 = waiting for INSYNC, 1 = waiting for OK
+        StringBuilder raw = new StringBuilder();
+
         while (System.currentTimeMillis() < deadline) {
-            try {
-                send(new byte[]{CMD_GET_SYNC, CRC_EOP});
-                writeAttempts++;
-            } catch (IOException e) {
-                log.append("  write failed: ").append(e).append("\n");
-                throw e;
+            send(new byte[]{CMD_GET_SYNC, CRC_EOP});
+            sent++;
+            long until = System.currentTimeMillis() + 100;
+            while (System.currentTimeMillis() < until) {
+                Byte b = rxQueue.poll();
+                if (b == null) {
+                    fill(30);
+                    continue;
+                }
+                seen++;
+                if (raw.length() < 60) {
+                    if (raw.length() > 0) raw.append(' ');
+                    raw.append(String.format("%02X", b));
+                }
+                if (state == 0) {
+                    if (b == RESP_INSYNC) state = 1;
+                } else {
+                    if (b == RESP_OK) return;
+                    state = (b == RESP_INSYNC) ? 1 : 0;
+                }
             }
-            int[] seenCount = new int[1];
-            if (tryReadOk(120, seenCount, rawSeen)) return;
-            totalBytesSeen += seenCount[0];
         }
-        log.append("  diagnostic: sent ").append(writeAttempts)
-           .append(" sync commands, received ").append(totalBytesSeen).append(" total byte(s) back");
-        if (rawSeen.length() > 0) {
-            log.append(" [").append(rawSeen).append("]");
-        }
+        log.append("  diagnostic: sent ").append(sent).append(" sync commands, received ")
+           .append(seen).append(" byte(s)");
+        if (raw.length() > 0) log.append(" [").append(raw).append("]");
         log.append("\n");
         throw new TimeoutException("no response");
     }
 
-    // Like expectOk, but returns false on timeout instead of throwing,
-    // and uses a short timeout so we can retry fast within the sync burst.
-    // Also reports how many bytes it saw and what they were, for diagnostics.
-    private boolean tryReadOk(int timeoutMs, int[] seenCountOut, StringBuilder rawSeen) throws IOException {
-        byte[] buf = new byte[1];
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        int state = 0; // 0 = waiting for INSYNC, 1 = waiting for OK
-        while (System.currentTimeMillis() < deadline) {
-            int n = port.read(buf, 30);
-            if (n <= 0) continue;
-            seenCountOut[0]++;
-            if (rawSeen.length() < 40) {
-                if (rawSeen.length() > 0) rawSeen.append(",");
-                rawSeen.append(String.format("%02X", buf[0]));
-            }
-            if (state == 0) {
-                if (buf[0] == RESP_INSYNC) state = 1;
-                // else: stray byte, ignore and keep waiting
-            } else {
-                if (buf[0] == RESP_OK) return true;
-                state = 0; // unexpected byte, start over
-            }
-        }
-        return false;
-    }
+    // ---- programming -----------------------------------------------------------
 
     void enterProgMode() throws IOException, TimeoutException {
         send(new byte[]{CMD_ENTER_PROGMODE, CRC_EOP});
@@ -159,6 +135,7 @@ class Stk500 {
 
     // Writes the whole flash image, one page at a time.
     void writeFlash(byte[] image) throws IOException, TimeoutException {
+        enterProgMode();
         int total = image.length;
         int pages = (total + pageSize - 1) / pageSize;
         for (int p = 0; p < pages; p++) {
@@ -200,7 +177,7 @@ class Stk500 {
         expectOk(2000);
     }
 
-    // ---- low-level serial helpers ----
+    // ---- low-level serial helpers ----------------------------------------------
 
     private void send(byte[] data) throws IOException {
         port.write(data, 2000);
@@ -213,19 +190,27 @@ class Stk500 {
         if (b2 != RESP_OK) throw new IOException("Expected OK, got " + (b2 & 0xFF));
     }
 
+    // Reads from the USB port into the big buffer and queues every byte received.
+    private int fill(int timeoutMs) throws IOException {
+        int n = port.read(rxBuf, timeoutMs);
+        for (int i = 0; i < n; i++) rxQueue.add(rxBuf[i]);
+        return n;
+    }
+
     private byte readByte(int timeoutMs) throws IOException, TimeoutException {
-        byte[] buf = new byte[1];
         long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            int n = port.read(buf, 200);
-            if (n > 0) return buf[0];
+        while (true) {
+            Byte b = rxQueue.poll();
+            if (b != null) return b;
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0) throw new TimeoutException("No response from board");
+            fill((int) Math.min(left, 200));
         }
-        throw new TimeoutException("No response from board");
     }
 
     private void drain() throws IOException {
-        byte[] buf = new byte[64];
-        while (port.read(buf, 50) > 0) { /* discard */ }
+        rxQueue.clear();
+        while (port.read(rxBuf, 50) > 0) { /* discard */ }
     }
 
     private void sleep(int ms) {

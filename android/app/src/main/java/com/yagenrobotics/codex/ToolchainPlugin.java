@@ -7,7 +7,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 // JS side: window.Capacitor.Plugins.Toolchain.prepare() / .compile({ code, fqbn })
-//          .listPorts() / .upload({ hexPath, deviceId, fqbn })
+//          .listPorts() / .upload({ hexPath?, fqbn?, port? })
 @CapacitorPlugin(name = "Toolchain")
 public class ToolchainPlugin extends Plugin {
 
@@ -37,34 +37,27 @@ public class ToolchainPlugin extends Plugin {
     public void listPorts(final PluginCall call) {
         new Thread(() -> {
             try {
-                call.resolve(UsbUploadHelper.listPorts(getContext()));
+                call.resolve(AvrdudeUploader.listPorts());
             } catch (Exception e) {
-                call.reject("Could not list USB ports: " + e);
+                call.reject("Could not list ports: " + e);
             }
         }).start();
     }
 
-    // Expects { hexPath: string, deviceId?: number }. If hexPath is omitted,
-    // it uses the .hex produced by the most recent compile() call for this fqbn.
+    // Uploads using avrdude against /dev/ttyUSB0 (or the given port).
+    // If hexPath is omitted, uses the .hex from the most recent compile() for this fqbn.
     @PluginMethod
     public void upload(final PluginCall call) {
         final String fqbn = call.getString("fqbn", "arduino:avr:uno");
-        final int deviceId = call.getInt("deviceId", -1);
+        final String port = call.getString("port", null);
         new Thread(() -> {
             try {
+                Toolchain tc = Toolchain.get(getContext());
                 String hexPath = call.getString("hexPath");
-                StringBuilder log = new StringBuilder();
                 if (hexPath == null || hexPath.isEmpty()) {
-                    hexPath = Toolchain.get(getContext()).lastHexPathFor(fqbn);
-                    if (hexPath == null) {
-                        JSObject fail = new JSObject();
-                        fail.put("success", false);
-                        fail.put("log", "No compiled program found. Compile first, then upload.");
-                        call.resolve(fail);
-                        return;
-                    }
+                    hexPath = tc.lastHexPathFor(fqbn);
                 }
-                call.resolve(UsbUploadHelper.upload(getContext(), hexPath, deviceId, log));
+                call.resolve(AvrdudeUploader.upload(tc.getBase(), hexPath, port));
             } catch (Exception e) {
                 call.reject("Upload failed: " + e);
             }

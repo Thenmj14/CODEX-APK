@@ -115,9 +115,7 @@ export async function flashSketch(boardId, port) {
   if (isNative()) {
     try {
       const fqbn = await getBoardFqbn(boardId);
-      const match = nativePortsCache.find((p) => p.name === port);
-      const deviceId = match ? match.deviceId : -1;
-      const r = await toolchain().upload({ fqbn, deviceId });
+      const r = await toolchain().upload({ fqbn, port });
       return { success: !!r.success, log: r.log || "" };
     } catch (err) {
       return { success: false, log: `Native upload error.\n${err}` };

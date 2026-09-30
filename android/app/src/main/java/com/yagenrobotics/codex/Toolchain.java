@@ -24,7 +24,7 @@ class Toolchain {
 
     private final java.util.Map<String, String> lastHexByFqbn = new java.util.HashMap<>();
 
-    private static final String PACK_VERSION = "1";
+    private static final String PACK_VERSION = "2";
     private static Toolchain instance;
 
     private final Context ctx;
