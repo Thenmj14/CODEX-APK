@@ -65,19 +65,16 @@ class Toolchain {
         JSObject out = new JSObject();
         StringBuilder log = new StringBuilder();
         try {
-            if (fqbn.startsWith("esp32")) {
-                out.put("success", false);
-                out.put("log", "ESP32 (IoT CUBE) support is not installed in the Android app yet.\n");
-                return out;
-            }
+            boolean esp = fqbn.startsWith("esp32");
             ensureReady();
+            if (esp) ensureEsp32Ready();
 
             File sketchDir = new File(base, "work/sketch");
             sketchDir.mkdirs();
             try (FileOutputStream fos = new FileOutputStream(new File(sketchDir, "sketch.ino"))) {
                 fos.write(code.getBytes(StandardCharsets.UTF_8));
             }
-            File build = new File(base, "work/build");
+            File build = new File(base, esp ? "work/build-esp32" : "work/build");
             build.mkdirs();
             File tmp = new File(base, "tmp");
             tmp.mkdirs();
@@ -90,6 +87,7 @@ class Toolchain {
             Map<String, String> env = pb.environment();
             env.put("HOME", base.getPath());
             env.put("TMPDIR", tmp.getPath());
+            if (esp) env.put("ARDUINO_DIRECTORIES_DATA", base.getPath());
             env.put("ARDUINO_DIRECTORIES_USER", new File(base, "user").getPath());
             pb.directory(base);
             pb.redirectErrorStream(true);
@@ -106,7 +104,7 @@ class Toolchain {
                 log.append(line).append("\n");
             }
             int exit = p.waitFor();
-            File hex = new File(build, "sketch.ino.hex");
+            File hex = new File(build, esp ? "sketch.ino.merged.bin" : "sketch.ino.hex");
             boolean ok = exit == 0 && hex.exists();
             out.put("success", ok);
             out.put("log", log.toString());
@@ -121,6 +119,54 @@ class Toolchain {
 
     File getBase() { return base; }
 
+    // ---- ESP32 (IoT Cube) setup -------------------------------------------------
+    private static final String ESP32_VERSION = "1";
+
+    private void ensureEsp32Ready() throws Exception {
+        File marker = new File(base, ".esp32-ready-v" + ESP32_VERSION);
+        if (marker.exists()) return;
+        unpack("esp32.zip");
+        String b = base.getPath();
+        fillPlaceholders(new File(base, "packages/esp32/hardware/esp32/3.3.11/platform.txt"), b);
+        fillPlaceholders(new File(base, "packages/esp32/tools/esptool_py/4.8.1/esptool"), b);
+        String glibc = new File(base, "glibc").getPath();
+        String gccRoot = new File(base, "esp32-gcc").getPath();
+        String extra = gccRoot + "/lib:" + gccRoot + "/bin:" + gccRoot + "/libexec/gcc/xtensa-esp-elf/14.2.0";
+        wrapElfs(new File(base, "esp32-gcc"), glibc, extra, gccRoot + "/lib/gcc/");
+        wrapElfs(new File(base, "pyroot"), glibc);
+        File srcDir = new File(base, ".arduino15/packages/builtin/tools/ctags/5.8-arduino11");
+        File dstDir = new File(base, "packages/builtin/tools/ctags/5.8-arduino11");
+        dstDir.mkdirs();
+        copyFile(new File(srcDir, "ctags"), new File(dstDir, "ctags"));
+        copyFile(new File(srcDir, "ctags.real"), new File(dstDir, "ctags.real"));
+        new FileOutputStream(marker).close();
+    }
+
+    private void fillPlaceholders(File f, String basePath) throws Exception {
+        if (!f.exists()) return;
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        try (InputStream in = new FileInputStream(f)) {
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+        }
+        String text = new String(bos.toByteArray(), StandardCharsets.UTF_8).replace("@BASE@", basePath);
+        try (FileOutputStream fos = new FileOutputStream(f)) {
+            fos.write(text.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private void copyFile(File src, File dst) throws Exception {
+        if (!src.exists()) return;
+        try (InputStream in = new FileInputStream(src);
+             FileOutputStream os = new FileOutputStream(dst)) {
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+        }
+        dst.setExecutable(true, false);
+        dst.setReadable(true, false);
+    }
     // ---- helpers -----------------------------------------------------------------
     private void unpack(String asset) throws Exception {
         String basePath = base.getCanonicalPath();
@@ -129,7 +175,7 @@ class Toolchain {
             byte[] buf = new byte[1 << 16];
             ZipEntry e;
             while ((e = zis.getNextEntry()) != null) {
-                File out = new File(base, e.getName());
+                File out = new File(base, e.getName().replace('\\', '/'));
                 if (!out.getCanonicalPath().startsWith(basePath)) continue;
                 if (e.isDirectory()) { out.mkdirs(); continue; }
                 out.getParentFile().mkdirs();
@@ -164,20 +210,32 @@ class Toolchain {
 
     // Replace every glibc program with a script that runs it through the bundled loader.
     private int wrapElfs(File dir, String glibc) throws Exception {
+        return wrapElfs(dir, glibc, null, null);
+    }
+
+    // Same, but can add extra library folders and a GCC_EXEC_PREFIX (used for the ESP32 compiler).
+    private int wrapElfs(File dir, String glibc, String extraLibs, String gccPrefix) throws Exception {
         int count = 0;
         File[] files = dir.listFiles();
         if (files == null) return 0;
+        String libPath = (extraLibs == null) ? glibc : glibc + ":" + extraLibs;
         for (File f : files) {
-            if (f.isDirectory()) { count += wrapElfs(f, glibc); continue; }
+            if (f.isDirectory()) { count += wrapElfs(f, glibc, extraLibs, gccPrefix); continue; }
             if (f.getName().endsWith(".real")) continue;
             if (!hasInterpreter(f)) continue;
             File real = new File(f.getPath() + ".real");
             if (!f.renameTo(real)) continue;
-            String script = "#!/system/bin/sh\n"
-                    + "exec " + glibc + "/ld-linux-aarch64.so.1 --library-path " + glibc
-                    + " \"$0.real\" \"$@\"\n";
+            StringBuilder sb = new StringBuilder("#!/system/bin/sh\n");
+            if (extraLibs != null) {
+                sb.append("export LD_LIBRARY_PATH=").append(libPath).append("\n");
+            }
+            if (gccPrefix != null && (f.getName().endsWith("gcc") || f.getName().endsWith("g++"))) {
+                sb.append("export GCC_EXEC_PREFIX=").append(gccPrefix).append("\n");
+            }
+            sb.append("exec ").append(glibc).append("/ld-linux-aarch64.so.1 --library-path ")
+              .append(libPath).append(" \"$0.real\" \"$@\"\n");
             try (FileOutputStream fos = new FileOutputStream(f)) {
-                fos.write(script.getBytes(StandardCharsets.UTF_8));
+                fos.write(sb.toString().getBytes(StandardCharsets.UTF_8));
             }
             f.setExecutable(true, false);
             f.setReadable(true, false);

@@ -9,3 +9,17 @@ build-error*.log
 src_backup_before_merge/
 pack.zip
 *.zip
+
+# Large bundled toolchains (ship via GitHub Release instead)
+*.zip
+
+# Built APKs/AABs
+*.apk
+*.aab
+android/app/release/
+android/app/debug/
+
+# Signing keys
+*.jks
+*.keystore
+keystore.properties

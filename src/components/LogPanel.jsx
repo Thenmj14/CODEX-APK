@@ -208,7 +208,7 @@ function SerialMonitor({ selectedPort }) {
   const [connected, setConnected] = useState(false);
   const [output,    setOutput]    = useState("");
   const [input,     setInput]     = useState("");
-  const esRef     = useRef(null);
+
   const scrollRef = useRef(null);
 
   const BAUD_RATES = ["9600", "19200", "38400", "57600", "115200"];
@@ -219,34 +219,42 @@ function SerialMonitor({ selectedPort }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [output]);
 
-  // Cleanup SSE on unmount
-  useEffect(() => () => esRef.current?.close(), []);
+  // Listen for incoming serial data from the native plugin
+  useEffect(() => {
+    const Toolchain = window.Capacitor?.Plugins?.Toolchain;
+    if (!Toolchain) return;
+    const dataHandle = Toolchain.addListener("serialData", (e) => {
+      setOutput(prev => prev + e.line + "\n");
+    });
+    const errorHandle = Toolchain.addListener("serialError", (e) => {
+      setOutput(prev => prev + "[error] " + e.error + "\n");
+      setConnected(false);
+    });
+    return () => {
+      dataHandle.remove();
+      errorHandle.remove();
+    };
+  }, []);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(async () => {
     if (!selectedPort) { alert("Select a port from the toolbar first."); return; }
-    const es = new EventSource(
-      `http://127.0.0.1:5000/api/serial/stream?port=${encodeURIComponent(selectedPort)}&baud=${baud}`
-    );
-    esRef.current = es;
-    es.onmessage = (e) => setOutput(prev => prev + e.data + "\n");
-    es.onerror   = ()  => { setConnected(false); es.close(); };
-    setConnected(true);
-    setOutput("");
+    try {
+      await window.Capacitor.Plugins.Toolchain.connectSerial({ port: selectedPort, baud: parseInt(baud) });
+      setConnected(true);
+      setOutput("");
+    } catch (e) {
+      alert("Could not connect: " + e);
+    }
   }, [selectedPort, baud]);
 
-  const disconnect = useCallback(() => {
-    esRef.current?.close();
+  const disconnect = useCallback(async () => {
+    await window.Capacitor.Plugins.Toolchain.disconnectSerial();
     setConnected(false);
-    fetch("http://127.0.0.1:5000/api/serial/stop", { method: "POST" }).catch(() => {});
   }, []);
 
   const sendLine = useCallback(() => {
     if (!input.trim() || !connected) return;
-    fetch("http://127.0.0.1:5000/api/serial/send", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ data: input + "\n" }),
-    });
+    window.Capacitor.Plugins.Toolchain.sendSerial({ data: input + "\n" });
     setInput("");
   }, [input, connected]);
 

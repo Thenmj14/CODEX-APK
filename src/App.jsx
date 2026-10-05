@@ -250,6 +250,7 @@ export default function App() {
         log={uploadLog}
         isUploading={isUploading}
         lastUploadSuccess={uploadSuccess}
+        selectedPort={selectedPort}
       />
 
       {/* ── Project manager overlay ─────────────────────────── */}
