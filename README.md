@@ -7,10 +7,10 @@ GitHub Repository: https://github.com/Thenmj14/CODEX-APK
 Platform: Android (ARM64/aarch64 devices only)
 
 What CODEX Is:
-CODEX is a fully offline, standalone Android app that lets someone build programs for robots and electronics using drag-and-drop visual blocks (like Scratch), instead of typing code by hand. Once the blocks are arranged, the app automatically converts them into real Arduino C++ code, compiles that code into a program the hardware can run, and uploads it directly to the connected device over USB — all without needing a PC, the internet, or any separate software installed on the tablet.
+CODEX is a fully offline, standalone Android app that lets someone build programs for robots using drag-and-drop visual blocks (like Scratch), instead of typing code by hand. Once the blocks are arranged, the app automatically converts them into real Arduino C++ code, compiles that code into a program the hardware can run, and uploads it directly to the connected device over USB — all without needing a PC, the internet, or any separate software installed on the tablet.
 
 What It's Used For:
-CODEX currently supports three pieces of hardware, all built and sold under Yagen Robotics:
+CODEX currently supports three pieces of hardware:
 
 Mark 1 — a robot built on an Arduino Uno (ATmega328P chip)
 Mark 2 — a second robot, also Arduino Uno based
